@@ -1,0 +1,7 @@
+[build]
+  command = "npm install && npm run build"
+  publish = "public"
+
+[dev]
+  command = "npm start"
+  port = 4000
