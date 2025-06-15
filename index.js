@@ -40,8 +40,7 @@ const orderSchema = new mongoose.Schema({
 const Order = mongoose.model('Order', orderSchema);
 
 // User schema
-const bcrypt = require('bcrypt');
-const SALT_ROUNDS = 10;
+
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true }, // hashed
@@ -50,16 +49,40 @@ const userSchema = new mongoose.Schema({
 }, { timestamps: true });
 const User = mongoose.model('User', userSchema);
 
-// Review schema
-const reviewSchema = new mongoose.Schema({
-  productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
-  username: { type: String, required: true },
+// Feedback schema
+const feedbackSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String },
   text: { type: String, required: true },
-  rating: { type: Number, min: 1, max: 5, default: 5 },
+  date: { type: String, required: true }
 }, { timestamps: true });
-const Review = mongoose.model('Review', reviewSchema);
+const Feedback = mongoose.model('Feedback', feedbackSchema);
 
 // ========== API ROUTES ==========
+
+// ====== FEEDBACK API ======
+// Додати новий відгук
+app.post('/api/feedback', async (req, res) => {
+  try {
+    const { name, email, text, date } = req.body;
+    if (!name || !text || !date) {
+      return res.status(400).json({ error: 'Відсутні обовʼязкові поля' });
+    }
+    const feedback = await Feedback.create({ name, email, text, date });
+    res.json(feedback);
+  } catch (err) {
+    res.status(500).json({ error: 'Помилка сервера' });
+  }
+});
+// Отримати всі відгуки
+app.get('/api/feedback', async (req, res) => {
+  try {
+    const feedbacks = await Feedback.find().sort({ createdAt: -1 });
+    res.json(feedbacks);
+  } catch (err) {
+    res.status(500).json({ error: 'Помилка сервера' });
+  }
+});
 
 // Products CRUD
 // In-memory cache for products
@@ -122,6 +145,7 @@ app.delete('/api/orders/:id', async (req, res) => {
 
 // Register new user (admin only)
 app.post('/api/users', async (req, res) => {
+  console.log('POST /api/users', req.body);
   try {
     const { username, password, name, role } = req.body;
     if (!username || !password || !name) {
@@ -131,8 +155,7 @@ app.post('/api/users', async (req, res) => {
     if (existing) {
       return res.status(409).json({ error: 'User already exists' });
     }
-    const hash = await bcrypt.hash(password, SALT_ROUNDS);
-    const user = await User.create({ username, password: hash, name, role });
+    const user = await User.create({ username, password, name, role });
     res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, _id: user._id } });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -143,12 +166,14 @@ app.post('/api/users', async (req, res) => {
 app.post('/api/users/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    const user = await User.findOne({ username });
+    console.log('LOGIN ATTEMPT:', username);
+    // Case-insensitive search
+    const user = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
+    console.log('USER FOUND:', user);
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
+    if (password !== user.password) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // For now, just return user info (no JWT/session)
@@ -169,16 +194,33 @@ app.post('/api/users/change-password', async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    const match = await bcrypt.compare(currentPassword, user.password);
-    if (!match) {
+    if (currentPassword !== user.password) {
       return res.status(401).json({ error: 'Current password incorrect' });
     }
     if (newPassword.length < 6) {
       return res.status(400).json({ error: 'New password must be at least 6 characters' });
     }
-    user.password = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    user.password = newPassword;
     await user.save();
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Create user (admin only)
+app.post('/api/users', async (req, res) => {
+  try {
+    const { username, password, name, role } = req.body;
+    if (!username || !password || !name) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    const exists = await User.findOne({ username });
+    if (exists) {
+      return res.status(409).json({ error: 'User already exists' });
+    }
+    const user = await User.create({ username, password, name, role });
+    res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, _id: user._id } });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
