@@ -40,7 +40,8 @@ const orderSchema = new mongoose.Schema({
 const Order = mongoose.model('Order', orderSchema);
 
 // User schema
-
+const bcrypt = require('bcrypt');
+const SALT_ROUNDS = 10;
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true }, // hashed
@@ -121,7 +122,6 @@ app.delete('/api/orders/:id', async (req, res) => {
 
 // Register new user (admin only)
 app.post('/api/users', async (req, res) => {
-  console.log('POST /api/users', req.body);
   try {
     const { username, password, name, role } = req.body;
     if (!username || !password || !name) {
@@ -131,7 +131,8 @@ app.post('/api/users', async (req, res) => {
     if (existing) {
       return res.status(409).json({ error: 'User already exists' });
     }
-    const user = await User.create({ username, password, name, role });
+    const hash = await bcrypt.hash(password, SALT_ROUNDS);
+    const user = await User.create({ username, password: hash, name, role });
     res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, _id: user._id } });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
@@ -142,14 +143,12 @@ app.post('/api/users', async (req, res) => {
 app.post('/api/users/login', async (req, res) => {
   try {
     const { username, password } = req.body;
-    console.log('LOGIN ATTEMPT:', username);
-    // Case-insensitive search
-    const user = await User.findOne({ username: new RegExp(`^${username}$`, 'i') });
-    console.log('USER FOUND:', user);
+    const user = await User.findOne({ username });
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    if (password !== user.password) {
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     // For now, just return user info (no JWT/session)
@@ -170,33 +169,16 @@ app.post('/api/users/change-password', async (req, res) => {
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
     }
-    if (currentPassword !== user.password) {
+    const match = await bcrypt.compare(currentPassword, user.password);
+    if (!match) {
       return res.status(401).json({ error: 'Current password incorrect' });
     }
     if (newPassword.length < 6) {
       return res.status(400).json({ error: 'New password must be at least 6 characters' });
     }
-    user.password = newPassword;
+    user.password = await bcrypt.hash(newPassword, SALT_ROUNDS);
     await user.save();
     res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: 'Server error' });
-  }
-});
-
-// Create user (admin only)
-app.post('/api/users', async (req, res) => {
-  try {
-    const { username, password, name, role } = req.body;
-    if (!username || !password || !name) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-    const exists = await User.findOne({ username });
-    if (exists) {
-      return res.status(409).json({ error: 'User already exists' });
-    }
-    const user = await User.create({ username, password, name, role });
-    res.json({ success: true, user: { username: user.username, name: user.name, role: user.role, _id: user._id } });
   } catch (err) {
     res.status(500).json({ error: 'Server error' });
   }
